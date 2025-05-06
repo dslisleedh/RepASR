@@ -1,0 +1,57 @@
+# general settings
+name: RePASR
+model_type: RealESRShortcutModel
+scale: 4
+num_gpu: 1
+manual_seed: 0
+sample_step: 100
+test_sample_step: 128
+
+datasets:
+  # test_1:  # the 1st test dataset
+  #   name: DRealSR
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/datasets/DRealSR/Test_x4/test_LR
+  #   io_backend:
+  #     type: disk
+
+  # test_2:  # the 1st test dataset
+  #   name: RealSR
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/datasets/RealSRV3/LR
+  #   io_backend:
+  #     type: disk
+
+  test_3:  # the 1st test dataset
+    name: RealSRSet+5images
+    type: SingleImageDataset
+    dataroot_lq: /data/datasets/RealSRSet+5images
+    io_backend:
+      type: disk
+
+  # test_4:  # the 1st test dataset
+  #   name: RealLQ250
+  #   type: SingleImageDataset
+  #   dataroot_lq: /home2/leedh97/TFP/RealLQ250
+  #   io_backend:
+  #     type: disk
+
+# network structures
+network_g:
+  type: HierachicalWindowDiT
+  dim: 64
+  window_sizes: [8, 12, 16, 24, 32, 48]
+  num_heads: 4
+  exp_ratio: 2
+  num_blocks: 12
+
+# path
+path:
+  pretrain_network_g: /home/dslisleedh/RepASR/experiments/RePASR/models/net_g_20000.pth
+  param_key_g: 'params_ema'
+  strict_load_g: true
+
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, if None, use exp name
