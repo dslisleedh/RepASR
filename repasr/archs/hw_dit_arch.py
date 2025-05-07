@@ -501,13 +501,15 @@ class SimpleCNN(nn.Module):
         super().__init__()
         self.ln1 = LayerNorm(dim)
         self.ln2 = LayerNorm(dim)
+        self.ln3 = LayerNorm(dim)
         self.conv1 = ConvFFN(dim, 3, 2)
         self.conv2 = ConvFFN(dim, 3, 2)
-
+        self.conv3 = ConvFFN(dim, 3, 2)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.conv1(self.ln1(x))
         x = x + self.conv2(self.ln2(x))
+        x = x + self.conv3(self.ln3(x))
         return x
     
 
@@ -521,12 +523,16 @@ class HierachicalWindowDiT(nn.Module):
         super().__init__()
 
         # self.to_feat = nn.Conv2d(3, dim, 3, 1, 1)
+        # self.to_feat = nn.Sequential(
+        #     nn.Conv2d(3, dim, 3, 2, 1),
+        #     nn.SiLU(),
+        #     nn.Conv2d(dim, dim, 3, 2, 1),
+        #     nn.SiLU(),
+        #     nn.Conv2d(dim, dim, 3, 1, 1),
+        # )
         self.to_feat = nn.Sequential(
-            nn.Conv2d(3, dim, 3, 2, 1),
-            nn.SiLU(),
-            nn.Conv2d(dim, dim, 3, 2, 1),
-            nn.SiLU(),
-            nn.Conv2d(dim, dim, 3, 1, 1),
+            nn.PixelUnshuffle(4),
+            nn.Conv2d(3 * 16, dim, 3, 1, 1),
         )
         # self.lr_to_feat = nn.Conv2d(3, dim, 3, 1, 1)
         self.lr_to_feat = nn.Sequential(
@@ -585,19 +591,20 @@ class HierachicalWindowDiT(nn.Module):
 
         # to dim x 16 x 16 for alignment
         # training patch dim is 64. So, downsampling factor is 4
-        self.align_conv = nn.Sequential(  
-            nn.Conv2d(dim, dim * 2, 2, 2, 0),
+        self.align_conv = nn.Sequential(
+            nn.PixelUnshuffle(4),
+            nn.Conv2d(dim * 16, dim * 4, 1, 1, 0),
             nn.SiLU(),
-            nn.Conv2d(dim * 2, dim * 4, 2, 2, 0),
+            nn.Conv2d(dim * 4, align_dim, 1, 1, 0),
             nn.SiLU(),
-            nn.Conv2d(dim * 4, align_dim, 1),
+            nn.Conv2d(align_dim, align_dim, 3, 1, 1),
         )
-        nn.init.trunc_normal_(self.to_feat[0].weight, std=0.02)
-        nn.init.zeros_(self.to_feat[0].bias)
-        nn.init.trunc_normal_(self.to_feat[2].weight, std=0.02)
-        nn.init.zeros_(self.to_feat[2].bias)
-        nn.init.zeros_(self.to_feat[4].weight)
-        nn.init.zeros_(self.to_feat[4].bias)
+        nn.init.trunc_normal_(self.align_conv[1].weight, std=0.02)
+        nn.init.zeros_(self.align_conv[1].bias)
+        nn.init.trunc_normal_(self.align_conv[3].weight, std=0.02)
+        nn.init.zeros_(self.align_conv[3].bias)
+        nn.init.trunc_normal_(self.align_conv[5].weight, std=0.02)
+        nn.init.zeros_(self.align_conv[5].bias)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, d: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
         """
