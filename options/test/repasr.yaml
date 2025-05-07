@@ -39,11 +39,12 @@ datasets:
 # network structures
 network_g:
   type: HierachicalWindowDiT
-  dim: 64
-  window_sizes: [8, 12, 16, 24, 32, 48]
-  num_heads: 4
+  dim: 48
+  window_sizes: [8, 16, 16, 32, 32, 64]
+  num_heads: 3
   exp_ratio: 2
-  num_blocks: 12
+  num_blocks: 14
+  align_layer: 0.49
 
 # path
 path:

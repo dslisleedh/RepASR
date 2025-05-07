@@ -171,8 +171,12 @@ class ConvFFN(nn.Module):
     def __init__(self, dim: int, kernel_size: int, exp_ratio: int):
         super().__init__()
         self.proj = nn.Conv2d(dim, int(dim*exp_ratio), 1, 1, 0)
-        self.dwc = nn.Conv2d(int(dim*exp_ratio), int(dim*exp_ratio), kernel_size, 1, kernel_size//2, groups=int(dim*exp_ratio))
-        self.aggr = nn.Conv2d(int(dim*exp_ratio), dim, 1, 1, 0)
+        # self.dwc = nn.Conv2d(int(dim*exp_ratio), int(dim*exp_ratio), kernel_size, 1, kernel_size//2, groups=int(dim*exp_ratio))
+        self.dwc = nn.Conv2d(
+            int(dim * exp_ratio) // 2, int(dim * exp_ratio) // 2, kernel_size,
+            1, kernel_size // 2, groups=int(dim * exp_ratio) // 2
+        )
+        self.aggr = nn.Conv2d(int(dim * exp_ratio) // 2, dim, 1, 1, 0)
 
         nn.init.trunc_normal_(self.proj.weight, std=0.02)
         nn.init.zeros_(self.proj.bias)
@@ -182,8 +186,9 @@ class ConvFFN(nn.Module):
         nn.init.zeros_(self.aggr.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.gelu(self.proj(x))
-        x = F.gelu(self.dwc(x)) + x
+        x = self.proj(x)
+        x1, x2 = x.chunk(2, dim=1)
+        x = F.silu(self.dwc(x1)) * x2
         x = self.aggr(x)
         return x
 
@@ -511,19 +516,24 @@ class HierachicalWindowDiT(nn.Module):
     def __init__(
             self, dim: int, window_sizes: Sequence[int], num_heads: int,
             exp_ratio: int, num_blocks: int, align_layer: float = 0.33,
-            align_dim: int = 1024
+            align_dim: int = 384
     ):
         super().__init__()
 
         # self.to_feat = nn.Conv2d(3, dim, 3, 1, 1)
         self.to_feat = nn.Sequential(
-            nn.Conv2d(3, dim//2, 3, 2, 1),
+            nn.Conv2d(3, dim, 3, 2, 1),
             nn.SiLU(),
-            nn.Conv2d(dim//2, dim, 3, 2, 1),
+            nn.Conv2d(dim, dim, 3, 2, 1),
             nn.SiLU(),
             nn.Conv2d(dim, dim, 3, 1, 1),
         )
-        self.lr_to_feat = nn.Conv2d(3, dim, 3, 1, 1)
+        # self.lr_to_feat = nn.Conv2d(3, dim, 3, 1, 1)
+        self.lr_to_feat = nn.Sequential(
+            nn.Conv2d(3, dim, 3, 1, 1),
+            nn.SiLU(),
+            nn.Conv2d(dim, dim, 3, 1, 1)
+        )
         self.refine_lr = SimpleCNN(dim)
         self.t_embed = TimestepEmbedder(dim, dim)
         self.d_embed = TimestepEmbedder(dim, dim)
@@ -532,22 +542,41 @@ class HierachicalWindowDiT(nn.Module):
         attn_func = torch.compile(flex_attention, dynamic=True)
 
         self.nth_align_layer = int(num_blocks * align_layer)
+        # self.blocks = nn.ModuleList([
+        #     Block(
+        #         dim, window_sizes, num_heads,
+        #         exp_ratio, use_cross_attn=i <= self.nth_align_layer,
+        #         use_timestep_emb=i > self.nth_align_layer,
+        #         attn_func=attn_func, attn_type='Flex'
+        #     ) for i in range(num_blocks)
+        # ])
         self.blocks = nn.ModuleList([
             Block(
                 dim, window_sizes, num_heads,
-                exp_ratio, use_cross_attn=i <= self.nth_align_layer,
-                use_timestep_emb=i > self.nth_align_layer,
+                exp_ratio, use_cross_attn=True,
+                use_timestep_emb=True,
                 attn_func=attn_func, attn_type='Flex'
             ) for i in range(num_blocks)
         ])
 
         # upsampler  always 4 
+        # self.upsampler = nn.Sequential(
+        #     nn.Conv2d(dim, dim, 3, 1, 1),
+        #     nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+        #     nn.SiLU(),
+        #     nn.Conv2d(dim, dim, 3, 1, 1),
+        #     nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+        #     nn.SiLU(),
+        #     nn.Conv2d(dim, dim, 3, 1, 1),
+        #     nn.SiLU(),
+        #     nn.Conv2d(dim, 3, 3, 1, 1),
+        # )
         self.upsampler = nn.Sequential(
-            nn.Conv2d(dim, dim, 3, 1, 1),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            nn.Conv2d(dim, dim * 4, 3, 1, 1),
+            nn.PixelShuffle(2),
             nn.SiLU(),
-            nn.Conv2d(dim, dim, 3, 1, 1),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
+            nn.Conv2d(dim, dim * 4, 3, 1, 1),
+            nn.PixelShuffle(2),
             nn.SiLU(),
             nn.Conv2d(dim, dim, 3, 1, 1),
             nn.SiLU(),
@@ -557,11 +586,11 @@ class HierachicalWindowDiT(nn.Module):
         # to dim x 16 x 16 for alignment
         # training patch dim is 64. So, downsampling factor is 4
         self.align_conv = nn.Sequential(  
-            nn.Conv2d(dim, align_dim, 3, 2, 1),
+            nn.Conv2d(dim, dim * 2, 2, 2, 0),
             nn.SiLU(),
-            nn.Conv2d(align_dim, align_dim, 3, 2, 1),
+            nn.Conv2d(dim * 2, dim * 4, 2, 2, 0),
             nn.SiLU(),
-            nn.Conv2d(align_dim, align_dim, 1),
+            nn.Conv2d(dim * 4, align_dim, 1),
         )
         nn.init.trunc_normal_(self.to_feat[0].weight, std=0.02)
         nn.init.zeros_(self.to_feat[0].bias)
@@ -573,7 +602,7 @@ class HierachicalWindowDiT(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor, d: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: input features with shape of (B, 3, H, W)
+            x: input features with shape of (B, 3, H*4, W*4)
             t: timestep embedding with shape of (B,)
             ref: lr input features with shape of (B, 3, H, W)
         """

@@ -27,7 +27,7 @@ import math
 class DinoV2VE(nn.Module):
     def __init__(self):
         super().__init__()
-        self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+        self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
         self.model.eval()
         for p in self.model.parameters():
             p.requires_grad = False
@@ -336,9 +336,11 @@ class RealESRShortcutModel(SRModel):
 
         with torch.no_grad():
             self.net_g_ema.eval()
-            st = self.net_g_ema(xt, t, d, lq[n_flow:])
+            # st = self.net_g_ema(xt, t, d, lq[n_flow:])
+            st = self.net_g_ema(xt, t, torch.where(d == 1/self.sample_step, torch.zeros_like(d), d), lq[n_flow:])
             xtd = xt + st * d.view(-1, 1, 1, 1)
-            std = self.net_g_ema(xtd, t + d, d, lq[n_flow:])
+            # std = self.net_g_ema(xtd, t + d, d, lq[n_flow:])
+            std = self.net_g_ema(xtd, t + d, torch.where(d == 1/self.sample_step, torch.zeros_like(d), d), lq[n_flow:])
             target = (st + std) / 2
             target = target.detach().clone()
 
